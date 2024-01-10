@@ -1,0 +1,291 @@
+SELECT * FROM INFORMATION_SCHEMA.TABLES
+
+SELECT * FROM Xmas_Sales_data
+go
+
+--DATABASE NORMALIZATION
+--CREATE ONE SEPERATE DATE DIMENSION TABLE 
+SELECT Date INTO Dates 
+From Xmas_Sales_data
+
+DELECT DISTINCT date FROM Dates
+GO
+--TO REMOVING DUPLICATE 
+WITH distinct_date AS(SELECT
+        Date,
+        ROW_NUMBER() OVER (PARTITION BY Date ORDER BY (SELECT NULL)) AS RowNum
+    FROM Dates)
+DELETE FROM distinct_date WHERE RowNum > 1
+
+
+SELECT * FROM Dates -- get only distinct date 
+
+GO
+
+--create new product dimension table 
+SELECT Product_Type,Product_Category,Product_Name INTO Dim_Products
+FROM Xmas_Sales_data
+GO
+
+SELECT * FROM Dim_Products
+GO
+-- TO REMOVING DUPLICATE EXECUTE THE FOLLOWING BRLOW QUERIS
+
+
+with check_duplicate as(select  Product_Type,Product_Category,Product_Name,
+ROW_NUMBER() over(partition by product_name order by product_name) as checking 
+from dim_products)
+DELETE from check_duplicate 
+where checking > 1
+
+-- NOW ADD DIM_PRODUCT id column
+ALTER TABLE dim_products 
+ADD Product_id int primary key identity
+
+SELECT * FROM Dim_Products -- got it
+
+-- NOW MERGE DIM_PRODUCT TABLE WITH Xmas_Sales_data FACT TABLE 
+ALTER TABLE Xmas_Sales_data
+ADD Product_id int
+GO
+
+MERGE INTO Xmas_Sales_data AS target
+USING Dim_Products AS source
+ON target.product_name = source.product_name 
+WHEN MATCHED THEN
+    UPDATE SET target.Product_id = source.Product_id;
+GO
+SELECT DISTINCT City,Country INTO Dim_Location
+FROM Xmas_Sales_data
+
+select * from Dim_Location
+
+ALTER TABLE Dim_Location
+ADD Location_id INT PRIMARY KEY IDENTITY
+GO
+ALTER TABLE Xmas_Sales_data
+ADD Location_id INT
+GO
+MERGE INTO Xmas_Sales_data AS target
+USING Dim_Location AS source
+ON target.City = source.City 
+WHEN MATCHED THEN
+    UPDATE SET target.Location_id = source.Location_id;
+
+GO
+--NOW DELETE Product_Type,Product_Category,Product_Name FROM FACT TABLE
+ALTER TABLE Xmas_Sales_data
+DROP COLUMN Product_Type,Product_Category,Product_Name
+
+ALTER TABLE Xmas_Sales_data
+DROP COLUMN City,Country
+
+--NOW WE ARE CREATE A RELATIONSHIP BETWEEN Xmas_Sales_data FACT TABLE AND Dim_Products
+
+GO
+
+--JUST RETIEVE THE DATA FROM ALL THE TABLE
+SELECT * FROM Xmas_Sales_data
+SELECT * FROM Dim_Products
+SELECT * FROM Dates
+
+GO
+-- LET'S SOLVE THE BUSINESS PROBLEMS
+
+-- Total Sales of xmas sales
+SELECT round(SUM(Total_Sales),2) AS TOTAL_SALES FROM Xmas_Sales_data
+
+--Total cost of xmas sales
+SELECT round(SUM(Cost),2) AS TOTAL_COSTS FROM Xmas_Sales_data
+
+--total Profit of sales 
+SELECT round(SUM(Profit),2) AS TOTAL_PROFITS FROM Xmas_Sales_data
+
+-- How Much Tax charge on sales
+SELECT Round(SUM(Tax_Amount),2) AS TAX_CHARGED from Xmas_Sales_data
+
+--HIGHEST PRICE OF PRODUCT 
+SELECT MAX(Unit_Price) AS HIGHEST_PRICE FROM Xmas_Sales_data
+
+--LOWEST PROCE OF PRODUCT 
+SELECT MIN(Unit_Price) AS LOWEST_PRICE FROM Xmas_Sales_data
+
+--AVERAGE PRICE OF PRODUCT
+SELECT AVG(Unit_Price) AS AVERAGE_PRICE FROM Xmas_Sales_data
+
+--TOTAL QUANTITY SOLD
+SELECT SUM(Quantity) AS TOTAL_QUANTITY FROM Xmas_Sales_data
+
+--Highest orderd quantity  
+SELECT MAX(Quantity) AS HIGHEST_ORDERED_QUANTITY FROM Xmas_Sales_data
+
+--Lowest orderd quantity
+SELECT MIN(Quantity) AS LOWEST_ORDERED_QUANTITY FROM Xmas_Sales_data
+
+--Average orderd quantity
+SELECT AVG(Quantity) AS AVERAGE_ORDERED_QUANTITY FROM Xmas_Sales_data
+
+--Countries
+SELECT Distinct Country FROM Dim_Location
+
+--Top 5 highest sales generate Countries with their number of quantity sold 
+SELECT TOP 5 Country,ROUND(SUM(Total_Sales),2) AS Sales,SUM(Quantity) AS No_of_Quantity_Sold
+FROM Dim_Location AS L
+INNER JOIN Xmas_Sales_data  AS XS
+ON L.Location_id = XS.Location_id
+GROUP BY Country
+ORDER BY No_of_Quantity_Sold DESC
+
+--Top 5 highest sales generate Cities with their number of quantity sold 
+SELECT TOP 5 City,ROUND(SUM(Total_Sales),2) AS Sales,SUM(Quantity) AS No_of_Quantity_Sold
+FROM Dim_Location AS L
+INNER JOIN Xmas_Sales_data  AS XS
+ON L.Location_id = XS.Location_id 
+GROUP BY City
+ORDER BY No_of_Quantity_Sold DESC
+
+--which gender did the most shoppping
+SELECT Gender,round(SUM(Total_Sales),2)  AS Purchased
+FROM Xmas_Sales_data
+GROUP BY Gender
+ORDER BY Purchased DESC
+
+--top 5 highest orderd product
+
+SELECT TOP 5  p.Product_Name
+,sum(xs.Quantity) AS quantity_orderd
+FROM  Dim_Products AS p
+inner join Xmas_Sales_data AS xs
+ON p.product_id = xs.product_id
+GROUP BY Product_Name
+ORDER BY quantity_orderd DESC
+GO
+
+-- Top 5 Highest Profit Generate Product
+
+SELECT TOP 5 Product_Name, ROUND(SUM(Profit),2) as Highest_Profit
+FROM Dim_Products AS p
+INNER JOIN Xmas_Sales_data AS xs
+ON p.Product_id = xs.Product_id
+GROUP BY Product_Name
+ORDER BY Highest_Profit DESC
+GO
+
+-- Top 5 Highest Profit Generate cities
+
+SELECT TOP 5 City, round(sum(Profit),2) AS highest_profit
+FROM Dim_Location AS L
+INNER JOIN Xmas_Sales_data  AS XS
+ON L.Location_id = XS.Location_id 
+GROUP BY City
+ORDER BY highest_profit DESC
+
+GO
+
+-- YEARLY TREND SALES
+
+SELECT  YEAR(d.Date) AS Years ,
+SUM(Total_Sales)  Overall_sales
+FROM Dates AS d
+inner join Xmas_Sales_data AS xs
+ON d.Date = xs.Date
+GROUP BY YEAR(d.Date)
+GO
+
+--%YoY SALES ANALYSIS
+
+WITH CTE_SALE AS(SELECT Year(d.Date) Years, SUM(Total_Sales) AS Sales
+FROM Dates as d
+INNER JOIN Xmas_Sales_data AS xs
+ON d.Date = xs.Date
+GROUP BY Year(d.Date)),
+P_SALE AS
+(SELECT  *, LAG(Sales) OVER(ORDER BY YEARS) Previous_year_sale
+FROM CTE_SALE 
+)
+SELECT CTE_SALE.Years, CTE_SALE.Sales,
+CASE WHEN Previous_year_sale is not null
+then ROUND(((CTE_SALE.Sales - Previous_year_sale)/Previous_year_sale)*100,2)
+ELSE 0
+END AS Percentage_YoY_Sales
+FROM CTE_SALE 
+INNER JOIN P_SALE 
+ON CTE_SALE.Years = P_SALE.Years
+GO
+
+--NUMBER OF CUSTOMER WITH THEIR AGE RANGE
+
+SELECT Customer_Age_Range, COUNT(*) num_of_customer
+FROM Xmas_Sales_data
+group by Customer_Age_Range
+GO
+
+--list of expensive product 
+
+SELECT Product_Name
+FROM Dim_Products DP
+INNER JOIN Xmas_Sales_data AS XS
+ON DP.Product_id = XS.Product_id
+WHERE  XS.Unit_Price = (SELECT MAX(Unit_Price) AS EXPENSIVE_PRICE
+FROM Xmas_Sales_data)
+GO
+
+-- WHICH PRODUCT SOLD HIGHEST THAN TOTAL AVERAGE QUANTITY
+
+SELECT Product_Name
+FROM Dim_Products DP
+INNER JOIN Xmas_Sales_data AS XS
+ON DP.Product_id = XS.Product_id
+WHERE Quantity >(SELECT AVG(Quantity)
+FROM Xmas_Sales_data) 
+GO
+
+-- WHICH TIME HAS THE HIGHEST SALES
+
+WITH time_sale AS(SELECT DISTINCT DATEPART(HOUR,Time_Hr_Min) HOURS_SALE, ROUND(SUM(Total_Sales),2) AS SALES
+FROM Xmas_Sales_data
+GROUP BY DATEPART(HOUR,Time_Hr_Min))
+SELECT HOURS_SALE,SALES
+FROM time_sale
+WHERE SALES = (SELECT MAX(SALES) FROM time_sale)
+GO
+
+--CUSTOMER WHICH PAYMENT MODE USE FOR SHOPPING
+
+SELECT  Payment_Method, COUNT(*) used
+FROM Xmas_Sales_data
+GROUP BY Payment_Method
+ORDER BY used DESC
+GO
+
+--NUMBER OF PRODUCT BASED ON XMAS BUDGET
+
+SELECT Xmas_Budget, COUNT(*) total
+FROM Xmas_Sales_data
+GROUP BY Xmas_Budget
+GO
+
+--WHICH BUDGET TYPE GIVES HIGHEST PROFIT 
+
+SELECT TOP 1 Xmas_Budget, SUM(Profit) AS PROFITS
+FROM Xmas_Sales_data
+GROUP BY Xmas_Budget
+ORDER BY PROFITS DESC
+GO
+
+-- XMAS BUDGET WISE TOTAL PRODUCT CATEGOURY 
+SELECT DISTINCT Xmas_Budget, Product_Category,COUNT(*) NUM_OF_CATEGORY
+FROM Xmas_Sales_data AS XS
+INNER JOIN Dim_Products AS DP
+ON XS.Product_id = DP.Product_id
+GROUP BY Xmas_Budget, Product_Category
+GO
+
+--How Many Quantity Sold by Channel Each Month?
+
+SELECT DATENAME(MONTH,D.Date) AS MONTHS, Purchase_Type, SUM(Quantity) AS QUANTITY
+FROM Dates AS D
+INNER JOIN Xmas_Sales_data AS XS
+ON D.Date = XS.Date
+GROUP BY DATENAME(MONTH,D.Date),Purchase_Type
+ORDER BY QUANTITY DESC
